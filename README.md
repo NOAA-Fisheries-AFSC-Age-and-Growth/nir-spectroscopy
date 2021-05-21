@@ -1,2 +1,3 @@
 # nir-spectroscopy
-Scripts for working with Near Infrared (NIR) spectral data
+
+Included in this repository are scripts for loading Opus files and using Near Infrared (NIR) spectral data to build and validate predictive models.
