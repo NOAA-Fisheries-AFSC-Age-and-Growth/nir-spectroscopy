@@ -1,3 +1,3 @@
 # nir-spectroscopy
 
-Included in this repository are scripts for loading Opus files and using Near Infrared (NIR) spectral data to build and validate predictive models.
+Included in this repository are basic scripts for working with Opus files and spectral data from Bruker Fourier Transform Near-Infrared (FT-NIR) instruments. 
