@@ -1,0 +1,340 @@
+---
+title: "Read OPUS files into R"
+author: "Esther Goldstein"
+date: "2022-11-07"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+  markdown: 
+    wrap: 72
+---
+
+Database connection. TBD 
+https://inbo.github.io/tutorials/tutorials/r_large_data_files_handling/
+```{r}
+dbconnection <- odbcDriverConnect("Driver={SQL Server};Server={AKC0SS-VI-071.nmfs.local,1919};Database=AGE3;Trusted_Connection=yes;")
+```
+
+
+Load necessary packages
+
+```{r}
+# install.packages("remotes")
+#https://rdrr.io/github/konradmayer/hyperSpec.utils/f/README.md
+#remotes::install_github("konradmayer/hyperSpec.utils",dependencies=TRUE)
+
+if (!require("remotes")) install.packages("remotes")
+remotes::install_github("spectral-cockpit/opusreader2")
+library("opusreader2")
+
+
+packages <- c("dplyr", "tidyr","EMSC","purrr","devtools","simplerspec","hyperSpec","prospectr","data.table","opusreader2")
+
+# Install packages not yet installed
+installed_packages <- packages %in% rownames(installed.packages())
+if (any(installed_packages == FALSE)) {
+  install.packages(packages[!installed_packages])
+}
+
+
+# Packages loading
+invisible(lapply(packages, library, character.only = TRUE))
+
+#note that simplerspec might not be on cran, and might require devtools to install. I can't recall
+#library(devtools)
+#remotes::install_github("philipp-baumann/simplerspec")
+rm(installed_packages)
+rm(packages)
+```
+
+1)  Read in metadata.
+
+These spreadsheets were pulled from AGE3 datahub. I think there needs to be a step
+that pulls this updated list from the database. This could also be
+appended by new scan data by date as an alternative, but these CSV files
+are not too big to just get an updated one.
+
+```{r, include=FALSE,results='hide',message=FALSE,warning=FALSE}
+
+#reset the file paths and names as needed
+
+meta<-read.csv("~/Esther AG/Production NIR/Outlier detection/nir scans walleye pollock Survey.csv") 
+
+```
+
+2)  Filter the metadata as needed & combine data
+    into a single dataframe as needed or exclude specimens that you don't want. Here the 2016 and 2017 survey pollock might
+    need to be re-scanned. I will exclude them right away
+
+```{r, include=FALSE,results='hide',message=FALSE,warning=FALSE}
+
+head (meta)
+meta<-meta %>% 
+ filter(!grepl('2016|2017', cruise_number)) #here we exclude cruise numbers that include the patterns "2016" or "2017". I renamed it to keep the original data for comparison
+
+#if columns are the same, I can rowbind (rbind) whatever other df I load above
+#meta<-rbind(metas_1,othermetadf)
+#rm(list=c("meta_1")) #list and delete any extra dfs you loaded or created here with ,"dfname"
+
+#this metadata includes maturity scans and maybe other tissues. I need to filter for only otoliths in this case.Note that access exports now include a structure type, but I downloaded these metadata before that was added
+names(meta)
+
+meta<-filter(meta,grepl("_O",file_name)) #this should remove all files that aren't otoliths becaue those all have "_O" in the name. They could be _OT for tango or _OA for MPA
+
+meta<-meta[meta$region %in% c("BS"),] #BS only
+
+meta$session_title1<-meta$session_title
+meta<-splitstackshape::cSplit(meta,sep="_",splitCols="session_title1")
+
+meta<-meta[is.na(meta$session_title1_3),] #I just filtered everything that was rescanned or fresh, or 45 deg etc. for now
+meta<-dplyr::select(meta,-c("session_title1_1","session_title1_1","session_title1_2"    ,"session_title1_3","session_title1_4"))
+```
+
+I have the metadata that includes only the files (scans) that I want. So
+now I need to read in those files Spectral Library is organized by
+species (common_name) year (collection_year) session_title file_name
+
+So here I want to read in a few practice files from each the tango and the MPA to make sure they are plotting correctly because it takesa long time to read all the files in 
+
+I will work with a practice copy folder from my desktop first. Here I
+just copied all the pollock files
+```{r, include=FALSE,results='hide',message=FALSE,warning=FALSE}
+
+#MPAsubset<-meta[meta$instrument_name %in% c("MPAII_AFSC"),] As as example you could subset by instrument here, or instead my year, etc.
+
+getwd() #I can only connect to the spectral library from home via VPN. Here I am practicing with copied files to make sure this works and not mess with the data library
+
+meta$file_path<-paste0(getwd(),"/SpectralLibraryCopy/",meta$common_name,"/",meta$collection_year,"/",meta$session_title,"/",meta$file_name)
+
+Opusfiles<-as.vector(meta$file_path)
+
+exists<-as.vector(lapply(Opusfiles, file.exists))#check that I have all my files or else I get an error when I read them in
+meta$exists<-exists
+meta1<-meta[meta$exists=="TRUE",] #filter the file list and data by otoliths with spectra files
+
+#Some file names were blank and it was giving me errors when readin in batches
+meta1<-meta1[complete.cases(meta1$file_name), ]
+meta1<-meta1[meta1$file_name != "", ]
+
+Opusfiles<-as.vector(meta1$file_path) #I repeated this and wrote over it so I wouldn't have extra files to read in that don't exist and produce an error
+
+rm(exists)
+rm(meta1)
+```
+
+
+
+followed this thread https://github.com/pierreroudier/opusreader/issues/24 to https://github.com/spectral-cockpit/opusreader2
+
+This is just joining files with metadata by file name. That info is nested in the OPUS file, but if data were uploaded to AGE3 later, then it's missing for some
+```{r, include=FALSE,results='hide',message=FALSE,warning=FALSE}
+
+# read a single file (one measurement) to check
+file <- Opusfiles[1]
+data_list <- read_opus(dsn = file)
+rm(data_list)
+rm(file)
+
+SPCfiles_nooffset<-lapply(Opusfiles,read_opus) #this gives an error if any file names or paths are wrong
+
+#The code in the chunk above should filter for only files that exist, but if I get an error in the line above I can find the problem file where it stops in this loop
+#SPCfiles_nooffset<-list()
+#for (i in 1:length (Opusfiles)){
+# SPCfiles_nooffset[[i]]<-read_opus(Opusfiles[[i]])
+#}
+
+str(SPCfiles_nooffset[[1]]) # check first element
+SPCfiles_nooffset[[1]]$ab$data #can see spc values this way I think
+SPCfiles_nooffset[[1]]$lab_and_process_param_raw$parameters #this has info about what setting was used (here otolith), sepcies, and file name
+SPCfiles_nooffset[[1]]$lab_and_process_param_raw$parameters$FC2$parameter_value #species
+SPCfiles_nooffset[[1]]$lab_and_process_param_raw$parameters$FD1$parameter_value #unique ID. Then paste with .0 to get full file name
+SPCfiles_nooffset[[1]]$ab$wavenumbers
+SPCfiles_nooffset[[1]]$instrument_ref$parameters$INS$parameter_value #instrument name
+
+#Now I need to extract spectra and add filenames to keep track of specimens
+spectra<-lapply(SPCfiles_nooffset, function (x) x$ab$data)
+#species<-lapply(SPCfiles_nooffset,function (x) x$lab_and_process_param_raw$parameters$FC2$parameter_value)
+#file_id<-lapply(SPCfiles_nooffset,function (x) x$lab_and_process_param_raw$parameters$FD1$parameter_value)
+
+instrument<-lapply(SPCfiles_nooffset,function (x) x$instrument_ref$parameters$INS$parameter_value) #instrument exists for all files, but 
+
+wavenumber<-lapply(SPCfiles_nooffset,function (x) x$ab$wavenumbers)#these could differ if settings changed or in light sources change
+
+
+
+spectra<-lapply(spectra,as.data.frame)
+
+
+str(spectra[[1]])
+
+for (i in 1:length(spectra)){
+  colnames(spectra[[i]])<-wavenumber[[i]] #need to assign column  names first or else there will be an issue with subsequent names added
+}
+
+#for (i in 1:length(spectra)){
+#  spectra[[i]]$species<-species[[i]]
+#}
+
+#for (i in 1:length(spectra)){
+#  spectra[[i]]$file_id<-file_id[[i]]
+#}
+
+for (i in 1:length(spectra)){
+  spectra[[i]]$instrument<-instrument[[i]]
+}
+
+for (i in 1:length(spectra)){
+  spectra[[i]]$file_path<-Opusfiles[[i]]
+}
+
+#I need to get the file names from the long list
+try<-spectra[[1]]
+
+splitstackshape::cSplit(as.data.frame(try$file_path),sep="/",splitCols="try$file_path")%>%select(tail(names(.), 1))
+
+file_name<-lapply(spectra, function (x) splitstackshape::cSplit(as.data.frame(x$file_path),sep="/",splitCols="x$file_path")%>%select(tail(names(.), 1)))
+
+
+file_name[[1]][[1,1]]
+
+for (i in 1:length(spectra)){
+  spectra[[i]]$file_name<-file_name[[i]][[1,1]]
+}
+
+```
+
+
+#see if all files have the same number of wavenumbers. If not, I need to interpolate. Here I just interpolate to the wavenumbers for the first spectra with the fewest wavenumbers
+
+```{r, include=FALSE,results='hide',message=FALSE,warning=FALSE}
+
+lengths<-vector()
+for (i in 1:length(spectra)){
+  l<-length(spectra[[i]])
+lengths[[i]]<-l
+  }
+summary(lengths)
+
+longindex<-match(max(lengths),lengths) #this gives the first one that matches the criteria
+longindex
+spectra[longindex] 
+names(spectra[[longindex]])
+str(spectra[[longindex]]$file_name)
+Opusfiles[longindex]
+
+shortindex<-match(min(lengths),lengths)#this should give the index of the first item that has the shortest number of wavenumbers. Then I can use these values for my interpolations
+shortindex
+length(spectra[[shortindex]])
+Opusfiles[shortindex]
+
+
+longindexall<-which(lengths %in% max(lengths)) #this gives the index for each item that matches the criteria
+longindexall
+shortindexall<-which(lengths %in% min(lengths)) #this gives the index for each item that matches the criteria
+shortindexall
+normindexall<-which(lengths %in% median(lengths))
+normindexall
+
+spectra[normindexall[1]] 
+spectra[longindexall[1]] 
+spectra[shortindexall[1]]
+
+spectra[[shortindex]]
+wavenumbers<-head(names(spectra[[shortindex]]),-3) #removes the last 3 items that weren't wavenumbers
+wavenumbers
+
+#trial before the loop
+m<-dplyr::select(spectra[[2]],c(instrument, file_path,file_name))
+  s<-dplyr::select(spectra[[2]],-c(instrument, file_path,file_name))
+         newv<-resample(s, wav=names(s),new.wav=wavenumbers,interpol="spline")
+         spcmatch<-as.data.frame(newv)
+          spcmatch$file_id<-m$instrument
+           spcmatch$instrument<-m$file_path
+            spcmatch$instrument<-m$file_name
+           
+rm(m)         
+rm(s)           
+rm(newv)
+rm(spcmatch)
+
+#now resample them all
+spectramatch<-list()
+for (i in 1:length(spectra)){
+m<-dplyr::select(spectra[[i]],c(instrument, file_path,file_name))
+  s<-dplyr::select(spectra[[i]],-c(instrument, file_path,file_name))
+         newv<-resample(s, wav=names(s),new.wav=wavenumbers,interpol="spline")#this is a decisions to use spline and can be changed
+         spcmatch<-as.data.frame(newv)
+          spcmatch$instrument<-m$instrument
+           spcmatch$file_path<-m$file_path
+            spcmatch$file_name<-m$file_name
+spectramatch[[i]]<-spcmatch
+}
+
+spectramatch[[1]]
+
+lengths<-vector()
+for (i in 1:length(spectramatch)){
+  l<-length(spectramatch[[i]])
+lengths[[i]]<-l
+  }
+summary(lengths)
+
+#looks good! 
+rm(spectra)
+```
+
+
+```{r, include=FALSE,results='hide',message=FALSE,warning=FALSE}
+
+df <- as.data.frame(do.call(rbind,spectramatch))
+head(df)
+names(df)
+rm(spectramatch)
+
+#df$file_name<-paste0(df$species,"_",df$file_id,".0",sep="")
+
+dfmeta<-dplyr::left_join(df,meta,by="file_name")#note that instrument names are different in the metadata file vs. OPUS files. 
+dfmeta<-dfmeta%>%dplyr::select(.,-c(instrument.x,instrument.y))
+
+rm(df)
+
+colnames(dfmeta)<-as.character(colnames(dfmeta))
+names(dfmeta)
+dfmeta_long<-tidyr::pivot_longer(dfmeta, cols=c(1:which( colnames(dfmeta)=="file_name")-2)) #make it long format to plot it
+
+dfmeta_long<-dfmeta_long%>%rename(.,"wavenumber"="name")
+dfmeta_long$wavenumber<-as.numeric(as.character(dfmeta_long$wavenumber))
+dfmeta_long$collection_year<-as.factor(as.character(dfmeta_long$collection_year))
+dfmeta_long$instrument_name<-as.factor(as.character(dfmeta_long$instrument_name))
+
+dfmeta_long<-dfmeta_long[!is.na(dfmeta_long$collection_year),]
+
+#check a plot, here it's TANGO only
+ggplot()+
+  geom_path(data=dfmeta_long[dfmeta_long$instrument_name =="TANGO_AFSC"  & dfmetalong$collection_year %in% c("2014", "2015"),],aes(x=wavenumber,y=value,color=final_age,group=file_name),size=.5)+ 
+  scale_x_reverse()+
+  #scale_color_viridis(name="Age (days)")+ #option="magma",
+  labs(y="Absorbance units",x= expression(paste("Wavenumber ", cm^-1)))+
+  theme(axis.text =element_text(size=10),
+        #axis.text.x =element_text(size=12,angle=25),
+        axis.title=element_text(size=12),
+        #legend.position = "none",
+        strip.text = element_text(size=14),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12), 
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"))+
+  facet_wrap(~collection_year)
+
+#Looks good!
+
+#Remove the superfluous files
+rm(list=ls()[! ls() %in% c("dfmeta_long","meta")])
+
+#useful discussion of OPUS files in R
+#https://github.com/philipp-baumann/simplerspec-read-filter-transform#reading-spectra-from-opus-spectrometer-files-prerequisites
+```
+
+
