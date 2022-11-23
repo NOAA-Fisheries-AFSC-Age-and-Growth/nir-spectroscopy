@@ -330,7 +330,7 @@ ggplot()+
 
 #Looks good!
 
-#Remove the superfluous files
+#Remove the superfluous objects to clean up the workspace
 rm(list=ls()[! ls() %in% c("dfmeta_long","meta")])
 
 #useful discussion of OPUS files in R
