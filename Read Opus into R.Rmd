@@ -12,9 +12,7 @@ editor_options:
 Database connection. TBD 
 https://inbo.github.io/tutorials/tutorials/r_large_data_files_handling/
 ```{r}
-dbconnection <- odbcDriverConnect("Driver={SQL Server};Server={AKC0SS-VI-071.nmfs.local,1919};Database=AGE3;Trusted_Connection=yes;")
-
-# Morgan adding code for DB connection and querying - this is what I used for querying RACEBASE so will need to be updated
+# Morgan adding code for DB connection and querying. I updated this to fit AGE3 and bit but it will still need some edits 
 library(DBI)
 library(odbc)
 library(tidyverse)
@@ -24,24 +22,27 @@ library(tidyverse)
 # Sys.getenv("PATH")
 # Sys.getenv("OCI_INC")
 
+# Write function for querying
 sql_run <- function(database, query) {
   query = paste(query, collapse = "\n")
   DBI::dbGetQuery(database, query, as.is=TRUE, believeNRows=FALSE)
 }
 
 #Create connection to database
-afsc <- DBI::dbConnect(odbc::odbc(), "afsc", 
-                       UID = "MARRINGTON", PWD = "NMF$afsc2017")
+# afsc <- DBI::dbConnect(odbc::odbc(), "afsc", 
+#                        UID = "MARRINGTON", PWD = "NMF$afsc2017") #for RACEBASE
+
+AGE3 <- odbcDriverConnect("Driver={SQL Server};Server={AKC0SS-VI-071.nmfs.local,1919};Database=AGE3;Trusted_Connection=yes;")
 
 #Run query
 #,30060,21740) # Enter species code; # 21740 (Pollock), 30060 (POP), 30152/30150 (Dusky); 21720 (Pacific Cod)
-specimen_dat_201902 <- sql_run(afsc,
+specimen_dat_201902 <- sql_run(AGE3, #update code for AGE3
         "SELECT * FROM RACEBASE.SPECIMEN 
         WHERE CRUISE = 201902 
         AND SPECIES_CODE = 21720
         AND VESSEL = 162")
 
-write.csv(specimen_dat_201902, file ="C:/Users/morgan.arrington/Work/RACEBASE database access/Queries/pcod_201902.csv")
+write.csv(specimen_dat_201902, file ="C:/Users/morgan.arrington/Work/RACEBASE database access/Queries/pcod_201902.csv") #update to correct path
 
 ```
 
