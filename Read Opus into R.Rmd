@@ -64,7 +64,7 @@ packages <- c("dplyr", "tidyr","EMSC","purrr","devtools","simplerspec","hyperSpe
 # Install packages not yet installed
 installed_packages <- packages %in% rownames(installed.packages())
 if (any(installed_packages == FALSE)) {
-  install.packages(packages[!installed_packages])
+  utils::install.packages(pkgs = packages[!installed_packages])
 }
 
 
