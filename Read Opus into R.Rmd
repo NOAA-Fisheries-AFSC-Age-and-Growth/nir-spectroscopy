@@ -368,6 +368,9 @@ ggplot()+
 write.csv(dfmeta, file = "~/SpectralData.csv") #rename following meaninful naming convention
 write.csv(dfmeta_long, file = "~/SpectralData_long.csv") #rename following meaningful naming convention
 
+#Could also save as r objects (.rda files), might be more efficient for large datasets
+save(dfmeta, file = "~/dfmeta.rda")
+save(dfmeta_long, file - "~/dfmeta_long.rda")
 
 #Remove the superfluous objects to clean up the workspace
 rm(list=ls()[! ls() %in% c("dfmeta_long","meta")])
