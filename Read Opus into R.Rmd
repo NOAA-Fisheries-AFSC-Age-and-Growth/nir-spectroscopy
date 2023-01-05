@@ -334,7 +334,7 @@ rm(df)
 
 colnames(dfmeta)<-as.character(colnames(dfmeta))
 names(dfmeta)
-dfmeta_long<-tidyr::pivot_longer(dfmeta, cols=c(1:which( colnames(dfmeta)=="file_name")-2)) #make it long format to plot it
+dfmeta_long<-tidyr::pivot_longer(dfmeta, cols=c(1:(which(colnames(dfmeta)=="file_name")-2))) #make it long format to plot it
 
 dfmeta_long<-dfmeta_long%>%rename(.,"wavenumber"="name")
 dfmeta_long$wavenumber<-as.numeric(as.character(dfmeta_long$wavenumber))
