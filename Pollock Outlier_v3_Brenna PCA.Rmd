@@ -1,0 +1,643 @@
+---
+title: "Pollock outlier detection"
+author: "Esther Goldstein"
+date: "2022-11-07"
+output:
+  pdf_document: default
+  html_document: default
+editor_options:
+  chunk_output_type: console
+  markdown:
+    wrap: 72
+---
+
+Database connection. TBD 
+https://inbo.github.io/tutorials/tutorials/r_large_data_files_handling/
+```{r}
+
+```
+
+
+Load necessary packages
+
+```{r, include=FALSE,results='hide',message=FALSE,warning=FALSE}
+# install.packages("remotes")
+#https://rdrr.io/github/konradmayer/hyperSpec.utils/f/README.md
+#remotes::install_github("konradmayer/hyperSpec.utils",dependencies=TRUE)
+
+if (!require("remotes")) install.packages("remotes")
+remotes::install_github("spectral-cockpit/opusreader2")
+library("opusreader2")
+
+
+packages <- c("dplyr", "tidyr","EMSC","purrr","devtools","simplerspec","hyperSpec","prospectr","data.table","opusreader2","viridis","prospectr","vegan","tinytex","plotly","SIBER")
+
+# Install packages not yet installed
+installed_packages <- packages %in% rownames(installed.packages())
+if (any(installed_packages == FALSE)) {
+  install.packages(packages[!installed_packages])
+}
+
+
+# Packages loading
+invisible(lapply(packages, library, character.only = TRUE))
+
+#note that simplerspec might not be on cran, and might require devtools to install. I can't recall
+#library(devtools)
+#remotes::install_github("philipp-baumann/simplerspec")
+rm(installed_packages)
+rm(packages)
+```
+
+1)  Read in metadata.
+
+Spreadsheet was pulled from AGE3 datahub. All fisheries and all
+survey Walleye Pollock data to date. I think there needs to be a step
+that pulls this updated list from the database. This could also be
+appended by new scan data by date as an alternative, but these CSV files
+are not too big to just get an updated one.
+
+Here, we can change this part of the code to read in files differently
+
+```{r, include=FALSE,results='hide',message=FALSE,warning=FALSE,eval = FALSE}
+#reset the file paths and names as needed
+
+metasurvey<-read.csv("~/Esther AG/Production NIR/Outlier detection/nir scans walleye pollock Survey.csv") 
+
+metafishery<-read.csv("~/Esther AG/Production NIR/Outlier detection/nir scans walleye pollock Fishery.csv") 
+
+```
+
+2)  Filter the metadata as needed & combine the survey and fishery data
+    into a single dataframe. We can filter data as need, join various data spreadsheets etc.
+
+```{r, include=FALSE,results='hide',message=FALSE,warning=FALSE,eval = FALSE}
+
+head (metasurvey)
+
+#This is one way to filter based on a pattern a character string
+#metasurvey_1<-metasurvey %>% 
+# filter(!grepl('2016|2017', cruise_number)) #here we exclude cruise numbers that include the patterns "2016" or "2017". I renamed it to keep the original data for comparison. I kept those out initially because there were odd patterns in the spectra. Working theory is that it's a glycerin thymol storage issue
+
+#Here I just copied my dataframe to work with it below and leave the original dataframe intact. This is not necessary to do.
+metasurvey_1<-metasurvey
+
+#collection_type tracks fishery vs. survey
+#if columns are the same, I can rowbind (rbind)
+meta<-rbind(metasurvey_1,metafishery)
+rm(list=c("metafishery","metasurvey","metasurvey_1")) #I removed these interim dataframes to save space
+
+#this metadata includes maturity scans and maybe other tissues. I need to filter for only otoliths in this case.Note that access exports now include a structure type, but I downloaded these metadata before that was added
+names(meta)
+
+meta<-filter(meta,grepl("_O",file_name)) #this should remove all files that aren't otoliths becaue those all have "_o" in the name. They could be _OT for tango or _OA for MPA
+
+meta<-meta[meta$region %in% c("BS"),] #We only want Bering Sea for the first FT-NIRS models. This can be used to filter dataframes in any way you want
+
+meta$session_title1<-meta$session_title #copy the session title to a new column so that I can split it up as I want, but maintain the original column
+
+meta<-splitstackshape::cSplit(meta,sep="_",splitCols="session_title1")
+
+meta<-meta[is.na(meta$session_title1_3),] #I just filtered everything that was rescanned or fresh, or 45 deg etc. for now
+
+meta<-dplyr::select(meta,-c("session_title1_1","session_title1_1","session_title1_2"    ,"session_title1_3","session_title1_4")) #remove the unecessary columns that I made
+
+#curious about weird scans
+nrow(meta[meta$broken==1,])
+nrow(meta[meta$crystallized==1,])
+nrow(meta[meta$other_problem==1,])
+#what are other problems?
+meta[meta$other_problem==1,] #comments have discoloration, nodules. etc.
+#I could use these 3 categories just to color code and see hwo they look
+
+```
+
+I have the metadata that includes only the files (scans) that I want. So
+now I need to read in those files Spectral Library is organized by
+species (common_name) year (collection_year) session_title file_name
+
+So here I want to read in a few practice files from each the tango and the MPA to make sure they are plotting correctly because it takesa long time to read all the files in 
+
+I will work with a practice copy folder from my desktop first. Here I
+just copied all the pollock files
+```{r, include=FALSE,results='hide',message=FALSE,warning=FALSE,eval = FALSE}
+MPAsubset<-meta[meta$instrument_name %in% c("MPAII_AFSC"),]
+
+getwd() #I can only connect to the spectral library from home via VPN. Here I am practicing wih copied files to make sure this works and not mess with the data library
+
+MPAsubset$file_path<-paste0(getwd(),"/SpectralLibraryCopy/",MPAsubset$common_name,"/",MPAsubset$collection_year,"/",MPAsubset$session_title,"/",MPAsubset$file_name)
+
+Opusfiles<-as.vector(MPAsubset$file_path)
+
+exists<-as.vector(lapply(Opusfiles, file.exists))#check that I have all my files or else I get an error when I read them in
+MPAsubset$exists<-exists
+MPAsubset1<-MPAsubset[MPAsubset$exists=="TRUE",] #filter the file list and data by otoliths with spectra files
+
+#Some file names were blank and it was giving me errors when reading in
+MPAsubset1<-MPAsubset1[complete.cases(MPAsubset1$file_name), ]
+MPAsubset1<-MPAsubset1[MPAsubset1$file_name != "", ]
+
+Opusfiles<-as.vector(MPAsubset1$file_path) #I repeated this and wrote over it so I wouldn't have extra files to read in that don't exist and produce an error
+
+```
+
+Followed this thread to use a new pacakge to read in OPUS files. https://github.com/pierreroudier/opusreader/issues/24 to https://github.com/spectral-cockpit/opusreader2
+
+```{r, include=FALSE,results='hide',message=FALSE,warning=FALSE,eval = FALSE}
+
+# read a single file (one measurement) to make sure it works, then delete it if it looks good
+file <- Opusfiles[757]
+data_list <- read_opus(dsn = file)
+rm(data_list)
+rm(file)
+
+SPCfiles_nooffset<-lapply(Opusfiles,read_opus) #this gives an error if any file names or paths are wrong. So check that if there are issues. It also takes a VERY long time to read in the files
+
+#The code in the chunk above should filter for only files that exist, but if I get an error in the line above I can find the problem file where it stops in this loop
+#SPCfiles_nooffset<-list()
+#for (i in 1:length (Opusfiles)){
+# SPCfiles_nooffset[[i]]<-read_opus(Opusfiles[[i]])
+#}
+
+#This is just to figure out file structure. Some of the nested metadata is the info that the scanners populate in the OPUS interface. You can check scan settings here too
+#str(SPCfiles_nooffset[[1]]) # check first element
+SPCfiles_nooffset[[1]]$ab$data #can see spc values this way I think
+SPCfiles_nooffset[[1]]$lab_and_process_param_raw$parameters #this has info about what setting was used (here otolith), sepcies, and file name
+SPCfiles_nooffset[[1]]$lab_and_process_param_raw$parameters$FC2$parameter_value #species
+SPCfiles_nooffset[[1]]$lab_and_process_param_raw$parameters$FD1$parameter_value #unique ID. Then paste with .0 to get full file name
+SPCfiles_nooffset[[1]]$ab$wavenumbers
+SPCfiles_nooffset[[1]]$instrument_ref$parameters$INS$parameter_value #instrument name
+
+```
+
+
+Now I need to extract spectra and add filenames to keep track of specimens.It's best to use the file names because if AGE3 was not used for some scans, then the metadata won't be nested in OPUS
+```{r}
+spectra<-lapply(SPCfiles_nooffset, function (x) x$ab$data)#the the spectra data from opus files
+
+instrument<-lapply(SPCfiles_nooffset,function (x) x$instrument_ref$parameters$INS$parameter_value) #instrument exists for all files 
+
+wavenumber<-lapply(SPCfiles_nooffset,function (x) x$ab$wavenumbers)#these could differ if settings changed or in light sources change
+
+spectra<-lapply(spectra,as.data.frame) #turn the list of spectra files into a dataframe because it's easier to workw ith
+
+#str(spectra[[1]]) #if i want to check it out and make sure list items look right
+
+for (i in 1:length(spectra)){
+  colnames(spectra[[i]])<-wavenumber[[i]] #need to assign column  names first or else there will be an issue with subsequent names added
+}
+
+#keep track of the instrument
+for (i in 1:length(spectra)){
+  spectra[[i]]$instrument<-instrument[[i]] 
+}
+
+#keep track of the file path
+for (i in 1:length(spectra)){
+  spectra[[i]]$file_path<-Opusfiles[[i]]
+}
+
+#I need to get the file names from the long list
+file_name<-lapply(spectra, function (x) splitstackshape::cSplit(as.data.frame(x$file_path),sep="/",splitCols="x$file_path")%>%select(tail(names(.), 1)))%>%type.convert(.,as.is=TRUE)
+#got this warning: In type.convert.default(X[[i]], ...) :
+  #'as.is' should be specified by the caller; using TRUE. I tried nesting type.convert(.,as.is=TRUE) in various places. Either got errors or the warning remained, but this seems to work still. Will trouble shoot if there are issues
+  
+file_name[[1]][[1,1]] #check the structure
+
+#keep track of file names
+for (i in 1:length(spectra)){
+  spectra[[i]]$file_name<-file_name[[i]][[1,1]]
+}
+
+```
+
+Check to see if all files have the same number of wavenumbers. If not, I need to interpolate
+
+```{r, include=FALSE,results='hide',message=FALSE,warning=FALSE,eval = FALSE}
+
+
+lengths<-vector()
+for (i in 1:length(spectra)){
+  l<-length(spectra[[i]])
+lengths[[i]]<-l
+  }
+summary(lengths)
+
+#Exploring the files a little here
+longindex<-match(max(lengths),lengths) #this gives the first one that matches the criteria
+longindex
+spectra[longindex] 
+names(spectra[[longindex]])
+str(spectra[[longindex]]$file_name)
+Opusfiles[longindex]
+
+shortindex<-match(min(lengths),lengths)#this should give the index of the first item that has the shortest number of wavenumbers. Then I can use these values for my interpolations
+shortindex
+length(spectra[[shortindex]])
+Opusfiles[shortindex]
+
+longindexall<-which(lengths %in% max(lengths)) #this gives the index for each item that matches the criteria
+longindexall
+shortindexall<-which(lengths %in% min(lengths))  the criteria
+shortindexall
+normindexall<-which(lengths %in% median(lengths))
+normindexall
+
+spectra[normindexall[1]] 
+spectra[longindexall[1]] 
+spectra[shortindexall[1]]
+
+#Now we actually use the short index to select the wavenumbers we want to interpolate to
+names(spectra[[shortindex]])
+wavenumbers<-head(names(spectra[[shortindex]]),-3) #removes the last 3 items that weren't wavenumbers. This will be consistent as long as I use the same code above. If that code changes to include more columns, then there will be an issue
+
+wavenumbers #can visually inspect that it ends on the correct wavenumber by comparing with names(spectra[[shortindex]]). Can also write in some sort of ifelse to check it it does or doesn't
+
+#trial before the loop to use spline interpolation to match wavenumbers
+m<-dplyr::select(spectra[[2]],c(instrument, file_path,file_name))
+  s<-dplyr::select(spectra[[2]],-c(instrument, file_path,file_name))
+         newv<-resample(s, wav=names(s),new.wav=wavenumbers,interpol="spline")
+         spcmatch<-as.data.frame(newv)
+          spcmatch$instrument<-m$instrument
+           spcmatch$file_path<-m$file_path
+            spcmatch$file_name<-m$file_name
+
+#if it worked, then just delete the intermediate steps so I don't store too much                
+rm(m)         
+rm(s)           
+rm(newv)
+rm(spcmatch)
+
+#now resample them all
+spectramatch<-list()
+for (i in 1:length(spectra)){
+m<-dplyr::select(spectra[[i]],c(instrument, file_path,file_name))
+  s<-dplyr::select(spectra[[i]],-c(instrument, file_path,file_name))
+         newv<-resample(s, wav=names(s),new.wav=wavenumbers,interpol="spline")#this is a decisions to use spline and can be changed
+         spcmatch<-as.data.frame(newv)
+          spcmatch$instrument<-m$instrument
+           spcmatch$file_path<-m$file_path
+            spcmatch$file_name<-m$file_name
+spectramatch[[i]]<-spcmatch
+}
+
+spectramatch[[1]]
+
+lengths<-vector()
+for (i in 1:length(spectramatch)){
+  l<-length(spectramatch[[i]])
+lengths[[i]]<-l
+  }
+summary(lengths)
+
+#looks good! 
+rm(spectra)
+```
+
+Make the dataframe and plot it to check it
+```{r, include=FALSE,results='hide',message=FALSE,warning=FALSE,eval = FALSE}
+df <- as.data.frame(do.call(rbind,spectramatch))
+head(df)
+names(df)
+rm(spectramatch)
+
+#df$file_name<-paste0(df$species,"_",df$file_id,".0",sep="")
+
+dfmeta<-dplyr::left_join(df,meta,by="file_name")#note that instrument names are different in the metadata file vs. OPUS files. 
+names(dfmeta)
+dfmeta<-dfmeta%>%dplyr::select(.,-c(instrument.x,instrument.y))#removing some extra columns from the join
+
+rm(df) #removing a dataframe that I don't need
+
+colnames(dfmeta)<-as.character(colnames(dfmeta))
+names(dfmeta)
+dfmeta_long<-tidyr::pivot_longer(dfmeta, cols=c(1:which( colnames(dfmeta)=="file_path")-1)) #make it long format to plot it. The negative column selection didn't work if I had file_name minus 2 columns. But it did work for file_path minus 1. Not sure why https://stackoverflow.com/questions/68073762/issue-with-selecting-negative-values-in-dplyr-with-embrace-arg
+
+dfmeta_long<-dfmeta_long%>%rename(.,"wavenumber"="name")
+dfmeta_long$wavenumber<-as.numeric(as.character(dfmeta_long$wavenumber))
+dfmeta_long$collection_year<-as.factor(as.character(dfmeta_long$collection_year))
+dfmeta_long$instrument_name<-as.factor(as.character(dfmeta_long$instrument_name))
+
+dfmeta_long<-dfmeta_long[!is.na(dfmeta_long$collection_year),]
+mpadf_long<-dfmeta_long
+
+rm(list=ls()[! ls() %in% c("mpadf_long","meta")]) #free up stored memory
+```
+
+plot theme for all plots You can change text size for plot labels here
+
+```{r}
+plotheme<-theme(axis.text =element_text(size=10),
+        #axis.text.x =element_text(size=12,angle=25),
+        axis.title=element_text(size=12),
+        #legend.position = "none",
+        strip.text = element_text(size=14),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12), 
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"))
+```
+
+Check plot to see if it looks right. Do sub-selection so it doesn't take too long if needed
+```{r, include=FALSE,results='hide',message=FALSE,warning=FALSE,eval = FALSE}
+allyears<-as.character(levels(mpadf_long$collection_year))
+
+ageplot<-ggplot()+
+  geom_path(data=mpadf_long[mpadf_long$collection_year %in% allyears,],aes(x=wavenumber,y=value,color=final_age,group=file_name),size=.5)+ 
+  scale_x_reverse()+
+  #scale_color_viridis(name="Age (days)")+ #option="magma",
+  labs(Title="MPAII_AFSC",y="Absorbance units",x= expression(paste("Wavenumber ", cm^-1)))+
+  plotheme+
+  facet_wrap(~collection_year)
+
+rm(ageplot)
+
+lengthplot<-ggplot()+
+  geom_path(data=mpadf_long[mpadf_long$collection_year %in% allyears,],aes(x=wavenumber,y=value,color=length,group=file_name),size=.5)+ 
+  scale_x_reverse()+
+  scale_color_viridis(name="Fork length (mm)")+ #option="magma",
+  labs(Title="MPAII_AFSC",y="Absorbance units",x= expression(paste("Wavenumber ", cm^-1)))+
+  plotheme+
+  facet_wrap(~collection_year)
+
+lengthplot
+
+rm(lengthplot)
+#Looks good!
+#useful discussion of OPUS files in R
+#https://github.com/philipp-baumann/simplerspec-read-filter-transform#reading-spectra-from-opus-spectrometer-files-prerequisites
+```
+
+
+First pass PCA to check for horrendous outliers in case I accidentally read in bad files before doing PLS models. We don't want to build models with bad data. 
+
+For the Tango files (below) there are some spectra that are obviously wrong. I think it makes sense to do this with pre-processed data.
+Use first-derivative (17-point Savitsky–Golay smooth) Helser et al. 2018. Used 2nd order polynomial following Benson et al. 2020
+```{r, include=FALSE,results='hide',message=FALSE,warning=FALSE,eval = FALSE}
+names(mpadf_long)
+
+mpadf_long<-mpadf_long[!is.na(mpadf_long$length),]
+
+mpadf_wide<-mpadf_long%>%tidyr::pivot_wider(names_from=wavenumber,values_from=value)
+
+?savitzkyGolay
+mpadf_wide<-as.data.frame(mpadf_wide)
+names(mpadf_wide)
+
+dfproc<-as.data.frame(cbind(mpadf_wide[,c(1:41)],
+                            prospectr::savitzkyGolay(mpadf_wide[,42:length(mpadf_wide)],m=1,p=2,w=17))) 
+
+names(dfproc)
+dfproc_long<-tidyr::pivot_longer(dfproc, cols=c(42:length(dfproc))) #make it long format to plot it
+names(dfproc_long)
+str(dfproc_long)
+dfproc_long$name<-as.numeric(as.character(dfproc_long$name))
+names(dfproc_long)
+dfproc_long<-dfproc_long%>%rename(.,"wavenumber"="name")
+
+ggplot()+
+  geom_path(data=dfproc_long,aes(x=wavenumber,y=value,color=length,group=file_name))+ #scale_x_reverse()+
+  scale_x_reverse()+
+  scale_color_viridis(name="Fork length (mm)")+ #option="magma",
+  labs(Title="MPAII_AFSC",y="Pre-processed absorbance",x= expression(paste("Wavenumber ", cm^-1)))+
+  plotheme
+```
+
+Started with filtering out wavenumbers >10000. This was conservative and I got 20 PCs for the best model. Irina cuts off at 8000 or 7500, but told Jon to do 7500, so I'll do that. Hoping I get fewer PCs without the extra noise
+Also check that samples scanned are unique
+```{r, include=FALSE,results='hide',message=FALSE,warning=FALSE,eval = FALSE}
+
+str(dfproc_long$wavenumber)
+dfproc_long<-dfproc_long[dfproc_long$wavenumber<=7500,] #Here I'm filtering for wavenumbers less than or equal to 7500
+
+dfproc<-dfproc_long%>%tidyr::pivot_wider(names_from=wavenumber,values_from=value)
+names(dfproc)
+
+#To check if samples were scanned more than once, there should be a unique identifier for each with
+#vessel_code, cruise_number, species_code (I think this is 201 for pollock but for some reason my column says a different number), specimen
+
+duplicates<-dfproc %>% 
+  group_by(vessel_code,cruise_number,specimen) %>% 
+  filter(n()>1)
+
+#apparently I don't have any if I did that right. there is a way to filter duplicates in dplyr, but here I would need to insert code to filter and make decisions about which spectra looks better
+
+```
+
+Do a PCA
+```{r, include=FALSE,results='hide',message=FALSE,warning=FALSE}
+
+#spectra along the columns and indiv along the rows.
+names(dfproc)
+
+pcaf <- rda(dfproc[,c(42:length(dfproc))], center=TRUE,scale=FALSE) # 'scale=TRUE' calls for a standardization
+
+eigfish <- pcaf$CA$eig   # Here you will get the eigenvalues
+
+#https://www.rdocumentation.org/packages/vegan/versions/2.4-2/topics/biplot.rda
+varsc0<-as.data.frame(vegan::scores(pcaf, choices = 1:3, display = "species", scaling = 0)) #to choose scaling to plot
+objsc0<-as.data.frame(vegan::scores(pcaf, choices = 1:3, display = "site", scaling = 0))
+varsc0$ID<-rownames(varsc0)
+
+#scale it for ggplot
+Spectrascores<-as.data.frame(cbind(objsc0$PC1,objsc0$PC2,objsc0$PC3))
+colnames(Spectrascores)<-c("PCs1","PCs2","PCs3")
+
+SpecVec<-as.data.frame(cbind(varsc0$PC1,varsc0$PC2,varsc0$PC3))
+head(SpecVec)
+colnames(SpecVec)<-c("PC1","PC2","PC3")
+
+#To automatially extract % explained by each axis for plots
+pcaf$tot.chi
+PC1perc<-round(pcaf$CA$eig[1]/pcaf$CA$tot.chi,digits=4)*100
+PC2perc<-round(pcaf$CA$eig[2]/pcaf$CA$tot.chi,digits=4)*100
+
+library(ggplot2)
+library(grid) #to draw arrows
+ggplot()+
+  geom_point(data=Spectrascores,aes(x=PCs1,y=PCs2))+labs(x=paste("PC1 (",PC1perc,"%)",sep=""), y=paste("PC2 (",PC2perc,"%)",sep=""))#this is site score, and should be points
+                                     
+ggplot()+
+  geom_point(data=SpecVec,aes(x=PC1,y=PC2))+labs(x="PC1", y="PC2") #this is spectra scores so they should be vectors.
+
+Spectrascores<-cbind(Spectrascores,dfproc[,1:41])
+
+ggplot()+
+  geom_hline(yintercept=0,color="gray")+
+  geom_vline(xintercept=0,color="gray")+
+  geom_point(data=Spectrascores,aes(x=PCs1,y=PCs2,fill=length,group=file_name),shape=21,size=6)+#this is site score, ie the indiv, 
+  labs(x=paste("PC1 (",PC1perc,"%)",sep=""), y=paste("PC2 (",PC2perc,"%)",sep=""))+
+  scale_fill_viridis(option="magma",name="Fork length (mm)")+
+ # scale_size_continuous(range=c(2,7),breaks=c(0,20,40,60,80),name="otolith weight (g)")+
+ # scale_fill_manual(values=c("red","blue"),name="")+
+  theme_bw()+ 
+  theme(panel.grid.major=element_blank(),panel.grid.minor=element_blank(),axis.text= element_text(size=16),
+        axis.title=element_text(size=16,face="bold"),
+        legend.text=element_text(size=12),
+        legend.title=element_text(size=10.5),
+        plot.title=element_text(size=16, face="bold"),
+        strip.text.x = element_text(size=14),
+        #legend.position = c(0.89, 0.5)
+        )
+
+
+```
+
+
+These data aren't evenly distributed by age group or size group. I think I really want to find outliers based on size groups (not ages), since we'll have fish lengths
+
+```{r}
+
+#Try dividing it into length quantiles
+Spectrascores$length_bin<-  cut(Spectrascores$length, breaks=c(quantile(Spectrascores$length, probs = seq(0, 1, by = 0.25))),labels=c("Q1","Q2","Q3","Q4"), include.lowest=TRUE)
+
+#https://stackoverflow.com/questions/71072250/trouble-understanding-vegancovellipse-covariance-ellipse-calculation
+
+#https://rdrr.io/cran/car/man/Ellipses.html
+#Let's plot a data ellipse
+ell<-car::dataEllipse(Spectrascores$PCs1,Spectrascores$PCs2, levels=c(0.999999), center.pch=19, 
+  center.cex=1.5, draw=TRUE,groups=Spectrascores$length_bin)
+ell
+
+elldf<-dplyr::bind_rows(lapply(ell,as.data.frame),.id="id")
+elldf<-rename(elldf,"length_bin"="id")
+```
+
+
+Plot PCA with 99.99% data ellipse by length quartile (Q1-Q4). Here we use length quartiles in case some fish are not aged yet. Then filter out those extreme spectra for PLS models
+
+This one one option. I would then need to filter for samples that fall outside the ellipes. This only involves 2 PCs though. There is an option to do this with more than 2 PCs but doesnt' seem necessary for spectra since most variability is in first 2 http://cran.nexr.com/web/packages/SIBER/vignettes/Points-Inside-Outside-Ellipse.html
+```{r, include=FALSE,message=FALSE,warning=FALSE}
+
+p<-ggplot()+
+  geom_hline(yintercept=0,color="gray")+
+  geom_vline(xintercept=0,color="gray")+
+  geom_point(data=Spectrascores,aes(x=PCs1,y=PCs2,fill=length,group=file_name),shape=21,size=3)+#this is site score, ie the indiv, 
+  geom_path(data=elldf,aes(x=x,y=y))+
+  labs(x=paste("PC1 (",PC1perc,"%)",sep=""), y=paste("PC2 (",PC2perc,"%)",sep=""))+
+  scale_fill_viridis(option="magma",name="Fork length (mm)")+
+ # scale_size_continuous(range=c(2,7),breaks=c(0,20,40,60,80),name="otolith weight (g)")+
+ # scale_fill_manual(values=c("red","blue"),name="")+
+  plotheme+
+  facet_wrap(~length_bin)
+
+p
+ggplotly(p)
+
+
+```
+
+Automatically get list of samples inside and outside of the ellipses
+```{r, include=FALSE,results='hide',message=FALSE,warning=FALSE,eval = FALSE}
+plot(Spectrascores[Spectrascores$length_bin %in% c("Q1"),]$PCs2 ~ Spectrascores[Spectrascores$length_bin %in% c("Q1"),]$PCs1, type = "p", asp = 1, 
+     xlim = c(-.04, .03), 
+     ylim = c(-.03, .03))
+mu<-colMeans(Spectrascores[Spectrascores$length_bin %in% c("Q1"),c("PCs1","PCs2")])
+Sigma <- cov(Spectrascores[Spectrascores$length_bin %in% c("Q1"),c("PCs1","PCs2")])
+p <- 0.999999 
+tmp <- addEllipse(mu, Sigma, p.interval = p, col = "red", lty = 2)
+Z <- pointsToEllipsoid(Spectrascores[Spectrascores$length_bin %in% c("Q1"),c("PCs1","PCs2")], Sigma, mu)
+inside <- ellipseInOut(Z, p = p)
+#Mahalanobis distance is one option as well. But looking at vegdist, it has some setbacks https://rdrr.io/cran/vegan/man/vegdist.html
+points(Spectrascores[Spectrascores$length_bin %in% c("Q1"),]$PCs2~ Spectrascores[Spectrascores$length_bin %in% c("Q1"),]$PCs1, 
+       col = c("red","black")[inside + 1], 
+       pch = "*",
+       cex = 2)
+
+firstq<-Spectrascores[Spectrascores$length_bin %in% c("Q1"),]
+firstq<-firstq[inside==TRUE,]
+out1<-firstq[inside==FALSE,]
+
+#2nd Q
+plot(Spectrascores[Spectrascores$length_bin %in% c("Q2"),]$PCs2 ~ Spectrascores[Spectrascores$length_bin %in% c("Q2"),]$PCs1, type = "p", asp = 1, 
+     xlim = c(-.04, .03), 
+     ylim = c(-.03, .03))
+mu<-colMeans(Spectrascores[Spectrascores$length_bin %in% c("Q2"),c("PCs1","PCs2")])
+Sigma <- cov(Spectrascores[Spectrascores$length_bin %in% c("Q2"),c("PCs1","PCs2")])
+p <- 0.999999 
+tmp <- addEllipse(mu, Sigma, p.interval = p, col = "red", lty = 2)
+Z <- pointsToEllipsoid(Spectrascores[Spectrascores$length_bin %in% c("Q2"),c("PCs1","PCs2")], Sigma, mu)
+inside <- ellipseInOut(Z, p = p)
+#Mahalanobis distance is one option as well. But looking at vegdist, it has some setbacks https://rdrr.io/cran/vegan/man/vegdist.html
+points(Spectrascores[Spectrascores$length_bin %in% c("Q2"),]$PCs2~ Spectrascores[Spectrascores$length_bin %in% c("Q2"),]$PCs1, 
+       col = c("red","black")[inside + 1], 
+       pch = "*",
+       cex = 2)
+
+secondq<-Spectrascores[Spectrascores$length_bin %in% c("Q2"),]
+secondq<-secondq[inside==TRUE,]
+
+out2<-secondq[inside==FALSE,]
+
+#3rd Q
+plot(Spectrascores[Spectrascores$length_bin %in% c("Q3"),]$PCs2 ~ Spectrascores[Spectrascores$length_bin %in% c("Q3"),]$PCs1, type = "p", asp = 1, 
+     xlim = c(-.04, .03), 
+     ylim = c(-.03, .03))
+mu<-colMeans(Spectrascores[Spectrascores$length_bin %in% c("Q3"),c("PCs1","PCs2")])
+Sigma <- cov(Spectrascores[Spectrascores$length_bin %in% c("Q3"),c("PCs1","PCs2")])
+p <- 0.999999 
+tmp <- addEllipse(mu, Sigma, p.interval = p, col = "red", lty = 2)
+Z <- pointsToEllipsoid(Spectrascores[Spectrascores$length_bin %in% c("Q3"),c("PCs1","PCs2")], Sigma, mu)
+inside <- ellipseInOut(Z, p = p)
+#Mahalanobis distance is one option as well. But looking at vegdist, it has some setbacks https://rdrr.io/cran/vegan/man/vegdist.html
+points(Spectrascores[Spectrascores$length_bin %in% c("Q3"),]$PCs2~ Spectrascores[Spectrascores$length_bin %in% c("Q3"),]$PCs1, 
+       col = c("red","black")[inside + 1], 
+       pch = "*",
+       cex = 2)
+
+thirdq<-Spectrascores[Spectrascores$length_bin %in% c("Q3"),]
+thirdq<-thirdq[inside==TRUE,]
+out3<-thirdq[inside==FALSE,]
+
+#4th Q
+plot(Spectrascores[Spectrascores$length_bin %in% c("Q4"),]$PCs2 ~ Spectrascores[Spectrascores$length_bin %in% c("Q4"),]$PCs1, type = "p", asp = 1, 
+     xlim = c(-.05, .06), 
+     ylim = c(-.06, .05))
+mu<-colMeans(Spectrascores[Spectrascores$length_bin %in% c("Q4"),c("PCs1","PCs2")])
+Sigma <- cov(Spectrascores[Spectrascores$length_bin %in% c("Q4"),c("PCs1","PCs2")])
+p <- 0.999999 
+tmp <- addEllipse(mu, Sigma, p.interval = p, col = "red", lty = 2)
+Z <- pointsToEllipsoid(Spectrascores[Spectrascores$length_bin %in% c("Q4"),c("PCs1","PCs2")], Sigma, mu)
+inside <- ellipseInOut(Z, p = p)
+#Mahalanobis distance is one option as well. But looking at vegdist, it has some setbacks https://rdrr.io/cran/vegan/man/vegdist.html
+points(Spectrascores[Spectrascores$length_bin %in% c("Q4"),]$PCs2~ Spectrascores[Spectrascores$length_bin %in% c("Q4"),]$PCs1, 
+       col = c("red","black")[inside + 1], 
+       pch = "*",
+       cex = 2)
+
+fourthq<-Spectrascores[Spectrascores$length_bin %in% c("Q4"),]
+fourthq<-fourthq[inside==TRUE,]
+out4<-fourthq[inside==FALSE,]
+
+outside<-rbind(out1,out2,out3,out4)
+outside$file_path
+
+rm(duplicates)
+keep<-c(firstq$file_name,secondq$file_name,thirdq$file_name,fourthq$file_name)
+
+rm(list=c("firstq","secondq","thirdq","fourthq","ell","elldf","check","Sigma","Sigma1","Sigma2","Sigma25","varsc0","u","v","eigfish","inside1","inside2","inside25","mu","mu1","mu2","mu25","out1","out2","out3","out4","outside"))
+```
+
+Use file_name values to filter my dataframe for modeling. I'll only filter my processed data here This just ensures that I don't have really bad spectra in my main model. The criteria was SD of ellipse of PC1 and PC2 <0.9999
+```{r, include=FALSE,results='hide',message=FALSE,warning=FALSE,eval = FALSE}
+bad<-dfproc_long[!dfproc_long$file_name %in% keep,]
+
+dfproc_long_filter1<-dfproc_long[dfproc_long$file_name %in% keep,]
+dfproc_filter1<-dfproc[dfproc$file_name %in% keep,]
+
+#What do the bad ones look like?
+ggplot()+
+  geom_path(data=dfproc_long_filter1,aes(x=wavenumber,y=value,color=length,group=file_name),size=.5)+ 
+  geom_path(data=bad,aes(x=wavenumber,y=value,group=file_name),size=.5,color="red")+ 
+  scale_x_reverse()+
+  scale_color_viridis(name="Fork length (mm)")+ #option="magma",
+  labs(Title="MPAII_AFSC",y="Absorbance units",x= expression(paste("Wavenumber ", cm^-1)))+
+  plotheme+
+  facet_wrap(~collection_year)
+
+#The one from 2018 does look odd. I will remove it.
+```
+
+
