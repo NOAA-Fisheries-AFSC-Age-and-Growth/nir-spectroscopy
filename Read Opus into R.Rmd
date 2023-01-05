@@ -328,7 +328,7 @@ rm(spectramatch)
 #df$file_name<-paste0(df$species,"_",df$file_id,".0",sep="")
 
 dfmeta<-dplyr::left_join(df,meta,by="file_name")#note that instrument names are different in the metadata file vs. OPUS files. 
-dfmeta<-dfmeta%>%dplyr::select(.,-c(instrument.x,instrument.y))
+dfmeta<-dfmeta%>%dplyr::select(.,-c(instrument.x,instrument.y, exists))
 
 rm(df)
 
