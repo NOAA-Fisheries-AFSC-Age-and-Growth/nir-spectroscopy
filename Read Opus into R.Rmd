@@ -59,7 +59,7 @@ remotes::install_github("spectral-cockpit/opusreader2")
 library("opusreader2")
 
 
-packages <- c("dplyr", "tidyr","EMSC","purrr","devtools","simplerspec","hyperSpec","prospectr","data.table","opusreader2")
+packages <- c("dplyr", "tidyr","EMSC","purrr","devtools","simplerspec","hyperSpec","prospectr","data.table","opusreader2", "splitstackshape")
 
 # Install packages not yet installed
 installed_packages <- packages %in% rownames(installed.packages())
