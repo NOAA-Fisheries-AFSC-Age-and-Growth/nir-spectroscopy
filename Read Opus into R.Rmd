@@ -296,7 +296,7 @@ spectramatch<-list()
 for (i in 1:length(spectra)){
 m<-dplyr::select(spectra[[i]],c(instrument, file_path,file_name))
   s<-dplyr::select(spectra[[i]],-c(instrument, file_path,file_name))
-         newv<-resample(s, wav=names(s),new.wav=wavenumbers,interpol="spline")#this is a decisions to use spline and can be changed
+         newv<-prospectr::resample(s, wav=names(s),new.wav=wavenumbers,interpol="spline")#this is a decisions to use spline and can be changed
          spcmatch<-as.data.frame(newv)
           spcmatch$instrument<-m$instrument
            spcmatch$file_path<-m$file_path
