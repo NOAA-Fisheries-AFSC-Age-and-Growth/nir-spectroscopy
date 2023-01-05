@@ -96,6 +96,7 @@ meta<-read.csv("~/Esther AG/Production NIR/Outlier detection/nir scans walleye p
 2)  Filter the metadata as needed & combine data
     into a single dataframe as needed or exclude specimens that you don't want. Here the 2016 and 2017 survey pollock might
     need to be re-scanned. I will exclude them right away
+Note from Morgan: it looks like any data with a scan date between June 2021 and May 2022 will need to be rescanned - stray light correction issue. WIP check with Morgan or Brenna.
 
 ```{r, include=FALSE,results='hide',message=FALSE,warning=FALSE}
 
