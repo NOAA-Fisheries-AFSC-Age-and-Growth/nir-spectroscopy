@@ -85,6 +85,8 @@ that pulls this updated list from the database. This could also be
 appended by new scan data by date as an alternative, but these CSV files
 are not too big to just get an updated one.
 
+Note from Morgan: if you pull data from NIR Administrator Access DB instead of AGE3 data hub, you have more control over what sessions you query, and you will only get data that matches spectral files that exist. This would eliminate need for a lot of filtering steps below. 
+
 ```{r, include=FALSE,results='hide',message=FALSE,warning=FALSE}
 
 #reset the file paths and names as needed
