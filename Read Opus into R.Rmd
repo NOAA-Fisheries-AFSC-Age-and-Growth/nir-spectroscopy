@@ -280,7 +280,7 @@ wavenumbers
 #trial before the loop
 m<-dplyr::select(spectra[[2]],c(instrument, file_path,file_name))
   s<-dplyr::select(spectra[[2]],-c(instrument, file_path,file_name))
-         newv<-resample(s, wav=names(s),new.wav=wavenumbers,interpol="spline")
+         newv<-prospectr::resample(s, wav=names(s),new.wav=wavenumbers,interpol="spline")
          spcmatch<-as.data.frame(newv)
           spcmatch$file_id<-m$instrument
            spcmatch$instrument<-m$file_path
