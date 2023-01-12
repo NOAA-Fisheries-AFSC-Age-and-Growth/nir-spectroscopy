@@ -30,7 +30,7 @@ remotes::install_github("spectral-cockpit/opusreader2")
 library("opusreader2")
 
 
-packages <- c("dplyr", "tidyr","EMSC","purrr","devtools","simplerspec","hyperSpec","prospectr","data.table","opusreader2","viridis","prospectr","vegan","tinytex","plotly","SIBER")
+packages <- c("dplyr", "tidyr","EMSC","purrr","devtools","simplerspec","hyperSpec","prospectr","data.table","opusreader2","viridis","prospectr","vegan","tinytex","plotly","SIBER","splitstackshape")
 
 # Install packages not yet installed
 installed_packages <- packages %in% rownames(installed.packages())
@@ -38,6 +38,7 @@ if (any(installed_packages == FALSE)) {
   install.packages(packages[!installed_packages])
 }
 
+#install.packages("packagename") #If you run into issues with automatic package install, try the individual package name install this way
 
 # Packages loading
 invisible(lapply(packages, library, character.only = TRUE))
@@ -61,7 +62,7 @@ Here, we can change this part of the code to read in files differently
 
 ```{r, include=FALSE,results='hide',message=FALSE,warning=FALSE,eval = FALSE}
 #reset the file paths and names as needed
-
+#you can set working directory if you don't want to type out entire filepath as set_wd()
 metasurvey<-read.csv("~/Esther AG/Production NIR/Outlier detection/nir scans walleye pollock Survey.csv") 
 
 metafishery<-read.csv("~/Esther AG/Production NIR/Outlier detection/nir scans walleye pollock Fishery.csv") 
@@ -89,8 +90,9 @@ rm(list=c("metafishery","metasurvey","metasurvey_1")) #I removed these interim d
 
 #this metadata includes maturity scans and maybe other tissues. I need to filter for only otoliths in this case.Note that access exports now include a structure type, but I downloaded these metadata before that was added
 names(meta)
+str(meta)
 
-meta<-filter(meta,grepl("_O",file_name)) #this should remove all files that aren't otoliths becaue those all have "_o" in the name. They could be _OT for tango or _OA for MPA
+meta<-dplyr::filter(meta,grepl("_O",file_name)) #this should remove all files that aren't otoliths because those all have "_o" in the name. They could be _OT for tango or _OA for MPA. This doesn't work for brenna
 
 meta<-meta[meta$region %in% c("BS"),] #We only want Bering Sea for the first FT-NIRS models. This can be used to filter dataframes in any way you want
 
@@ -98,7 +100,7 @@ meta$session_title1<-meta$session_title #copy the session title to a new column 
 
 meta<-splitstackshape::cSplit(meta,sep="_",splitCols="session_title1")
 
-meta<-meta[is.na(meta$session_title1_3),] #I just filtered everything that was rescanned or fresh, or 45 deg etc. for now
+meta<-meta[is.na(meta$session_title1_3),] #I just filtered everything that was rescanned or fresh, or 45 deg etc. for now. Note for E.G. Keeping the rescans would be better. I'll do this later. Look into whether file names for rescans. Keep the rescans and not the others regardless of whether they are 1 or 2
 
 meta<-dplyr::select(meta,-c("session_title1_1","session_title1_1","session_title1_2"    ,"session_title1_3","session_title1_4")) #remove the unecessary columns that I made
 
@@ -122,11 +124,13 @@ I will work with a practice copy folder from my desktop first. Here I
 just copied all the pollock files
 ```{r, include=FALSE,results='hide',message=FALSE,warning=FALSE,eval = FALSE}
 MPAsubset<-meta[meta$instrument_name %in% c("MPAII_AFSC"),]
-
+names(MPAsubset)
 getwd() #I can only connect to the spectral library from home via VPN. Here I am practicing wih copied files to make sure this works and not mess with the data library
 
-MPAsubset$file_path<-paste0(getwd(),"/SpectralLibraryCopy/",MPAsubset$common_name,"/",MPAsubset$collection_year,"/",MPAsubset$session_title,"/",MPAsubset$file_name)
+#MPAsubset$file_path<-paste0(getwd(),"/SpectralLibraryCopy/",MPAsubset$common_name,"/",MPAsubset$collection_year,"/",MPAsubset$session_title,"/",MPAsubset$file_name)
+setwd("C:/Users/esther.goldstein/Desktop/NIR_B20118A MPA only")
 
+MPAsubset$file_path<-paste0(getwd(),"/",MPAsubset$file_name)
 Opusfiles<-as.vector(MPAsubset$file_path)
 
 exists<-as.vector(lapply(Opusfiles, file.exists))#check that I have all my files or else I get an error when I read them in
@@ -146,7 +150,7 @@ Followed this thread to use a new pacakge to read in OPUS files. https://github.
 ```{r, include=FALSE,results='hide',message=FALSE,warning=FALSE,eval = FALSE}
 
 # read a single file (one measurement) to make sure it works, then delete it if it looks good
-file <- Opusfiles[757]
+file <- Opusfiles[1]
 data_list <- read_opus(dsn = file)
 rm(data_list)
 rm(file)
@@ -197,8 +201,9 @@ for (i in 1:length(spectra)){
   spectra[[i]]$file_path<-Opusfiles[[i]]
 }
 
+library(tidyr)
 #I need to get the file names from the long list
-file_name<-lapply(spectra, function (x) splitstackshape::cSplit(as.data.frame(x$file_path),sep="/",splitCols="x$file_path")%>%select(tail(names(.), 1)))%>%type.convert(.,as.is=TRUE)
+file_name<-lapply(spectra, function (x) splitstackshape::cSplit(as.data.frame(x$file_path),sep="/",splitCols="x$file_path")%>%dplyr::select(tail(names(.), 1)))%>%type.convert(.,as.is=TRUE)
 #got this warning: In type.convert.default(X[[i]], ...) :
   #'as.is' should be specified by the caller; using TRUE. I tried nesting type.convert(.,as.is=TRUE) in various places. Either got errors or the warning remained, but this seems to work still. Will trouble shoot if there are issues
   
@@ -215,6 +220,7 @@ Check to see if all files have the same number of wavenumbers. If not, I need to
 
 ```{r, include=FALSE,results='hide',message=FALSE,warning=FALSE,eval = FALSE}
 
+library(prospectr)
 
 lengths<-vector()
 for (i in 1:length(spectra)){
@@ -238,7 +244,7 @@ Opusfiles[shortindex]
 
 longindexall<-which(lengths %in% max(lengths)) #this gives the index for each item that matches the criteria
 longindexall
-shortindexall<-which(lengths %in% min(lengths))  the criteria
+shortindexall<-which(lengths %in% min(lengths))  #the criteria
 shortindexall
 normindexall<-which(lengths %in% median(lengths))
 normindexall
@@ -327,6 +333,7 @@ rm(list=ls()[! ls() %in% c("mpadf_long","meta")]) #free up stored memory
 plot theme for all plots You can change text size for plot labels here
 
 ```{r}
+library(ggplot2)
 plotheme<-theme(axis.text =element_text(size=10),
         #axis.text.x =element_text(size=12,angle=25),
         axis.title=element_text(size=12),
@@ -342,15 +349,18 @@ plotheme<-theme(axis.text =element_text(size=10),
 
 Check plot to see if it looks right. Do sub-selection so it doesn't take too long if needed
 ```{r, include=FALSE,results='hide',message=FALSE,warning=FALSE,eval = FALSE}
+library(viridis)
+
 allyears<-as.character(levels(mpadf_long$collection_year))
 
 ageplot<-ggplot()+
   geom_path(data=mpadf_long[mpadf_long$collection_year %in% allyears,],aes(x=wavenumber,y=value,color=final_age,group=file_name),size=.5)+ 
   scale_x_reverse()+
-  #scale_color_viridis(name="Age (days)")+ #option="magma",
+  scale_color_viridis(name="Age (days)")+ #option="magma",
   labs(Title="MPAII_AFSC",y="Absorbance units",x= expression(paste("Wavenumber ", cm^-1)))+
   plotheme+
   facet_wrap(~collection_year)
+ageplot
 
 rm(ageplot)
 
@@ -386,8 +396,7 @@ mpadf_wide<-mpadf_long%>%tidyr::pivot_wider(names_from=wavenumber,values_from=va
 mpadf_wide<-as.data.frame(mpadf_wide)
 names(mpadf_wide)
 
-dfproc<-as.data.frame(cbind(mpadf_wide[,c(1:41)],
-                            prospectr::savitzkyGolay(mpadf_wide[,42:length(mpadf_wide)],m=1,p=2,w=17))) 
+dfproc<-as.data.frame(cbind(mpadf_wide[,c(1:41)],                            prospectr::savitzkyGolay(mpadf_wide[,42:length(mpadf_wide)],m=1,p=2,w=17))) 
 
 names(dfproc)
 dfproc_long<-tidyr::pivot_longer(dfproc, cols=c(42:length(dfproc))) #make it long format to plot it
@@ -421,7 +430,7 @@ names(dfproc)
 duplicates<-dfproc %>% 
   group_by(vessel_code,cruise_number,specimen) %>% 
   filter(n()>1)
-
+duplicates
 #apparently I don't have any if I did that right. there is a way to filter duplicates in dplyr, but here I would need to insert code to filter and make decisions about which spectra looks better
 
 ```
@@ -432,7 +441,8 @@ Do a PCA
 #spectra along the columns and indiv along the rows.
 names(dfproc)
 
-pcaf <- rda(dfproc[,c(42:length(dfproc))], center=TRUE,scale=FALSE) # 'scale=TRUE' calls for a standardization
+pcaf <- vegan::rda(dfproc[,c(42:length(dfproc))], center=TRUE,scale=FALSE) # 'scale=TRUE' calls for a standardization
+summary(pcaf)
 
 eigfish <- pcaf$CA$eig   # Here you will get the eigenvalues
 
@@ -469,7 +479,7 @@ ggplot()+
   geom_vline(xintercept=0,color="gray")+
   geom_point(data=Spectrascores,aes(x=PCs1,y=PCs2,fill=length,group=file_name),shape=21,size=6)+#this is site score, ie the indiv, 
   labs(x=paste("PC1 (",PC1perc,"%)",sep=""), y=paste("PC2 (",PC2perc,"%)",sep=""))+
-  scale_fill_viridis(option="magma",name="Fork length (mm)")+
+  scale_fill_viridis(option="magma",name="Length (mm)")+
  # scale_size_continuous(range=c(2,7),breaks=c(0,20,40,60,80),name="otolith weight (g)")+
  # scale_fill_manual(values=c("red","blue"),name="")+
   theme_bw()+ 
@@ -480,7 +490,8 @@ ggplot()+
         plot.title=element_text(size=16, face="bold"),
         strip.text.x = element_text(size=14),
         #legend.position = c(0.89, 0.5)
-        )
+        )+
+  facet_wrap(~final_age)
 
 
 ```
@@ -497,7 +508,7 @@ Spectrascores$length_bin<-  cut(Spectrascores$length, breaks=c(quantile(Spectras
 
 #https://rdrr.io/cran/car/man/Ellipses.html
 #Let's plot a data ellipse
-ell<-car::dataEllipse(Spectrascores$PCs1,Spectrascores$PCs2, levels=c(0.999999), center.pch=19, 
+ell<-car::dataEllipse(Spectrascores$PCs1,Spectrascores$PCs2, levels=c(0.95), center.pch=19, 
   center.cex=1.5, draw=TRUE,groups=Spectrascores$length_bin)
 ell
 
@@ -536,7 +547,7 @@ plot(Spectrascores[Spectrascores$length_bin %in% c("Q1"),]$PCs2 ~ Spectrascores[
      ylim = c(-.03, .03))
 mu<-colMeans(Spectrascores[Spectrascores$length_bin %in% c("Q1"),c("PCs1","PCs2")])
 Sigma <- cov(Spectrascores[Spectrascores$length_bin %in% c("Q1"),c("PCs1","PCs2")])
-p <- 0.999999 
+p <- 0.95 
 tmp <- addEllipse(mu, Sigma, p.interval = p, col = "red", lty = 2)
 Z <- pointsToEllipsoid(Spectrascores[Spectrascores$length_bin %in% c("Q1"),c("PCs1","PCs2")], Sigma, mu)
 inside <- ellipseInOut(Z, p = p)
@@ -556,7 +567,7 @@ plot(Spectrascores[Spectrascores$length_bin %in% c("Q2"),]$PCs2 ~ Spectrascores[
      ylim = c(-.03, .03))
 mu<-colMeans(Spectrascores[Spectrascores$length_bin %in% c("Q2"),c("PCs1","PCs2")])
 Sigma <- cov(Spectrascores[Spectrascores$length_bin %in% c("Q2"),c("PCs1","PCs2")])
-p <- 0.999999 
+p <- 0.95 
 tmp <- addEllipse(mu, Sigma, p.interval = p, col = "red", lty = 2)
 Z <- pointsToEllipsoid(Spectrascores[Spectrascores$length_bin %in% c("Q2"),c("PCs1","PCs2")], Sigma, mu)
 inside <- ellipseInOut(Z, p = p)
@@ -577,7 +588,7 @@ plot(Spectrascores[Spectrascores$length_bin %in% c("Q3"),]$PCs2 ~ Spectrascores[
      ylim = c(-.03, .03))
 mu<-colMeans(Spectrascores[Spectrascores$length_bin %in% c("Q3"),c("PCs1","PCs2")])
 Sigma <- cov(Spectrascores[Spectrascores$length_bin %in% c("Q3"),c("PCs1","PCs2")])
-p <- 0.999999 
+p <- 0.95
 tmp <- addEllipse(mu, Sigma, p.interval = p, col = "red", lty = 2)
 Z <- pointsToEllipsoid(Spectrascores[Spectrascores$length_bin %in% c("Q3"),c("PCs1","PCs2")], Sigma, mu)
 inside <- ellipseInOut(Z, p = p)
@@ -597,7 +608,7 @@ plot(Spectrascores[Spectrascores$length_bin %in% c("Q4"),]$PCs2 ~ Spectrascores[
      ylim = c(-.06, .05))
 mu<-colMeans(Spectrascores[Spectrascores$length_bin %in% c("Q4"),c("PCs1","PCs2")])
 Sigma <- cov(Spectrascores[Spectrascores$length_bin %in% c("Q4"),c("PCs1","PCs2")])
-p <- 0.999999 
+p <- 0.95 
 tmp <- addEllipse(mu, Sigma, p.interval = p, col = "red", lty = 2)
 Z <- pointsToEllipsoid(Spectrascores[Spectrascores$length_bin %in% c("Q4"),c("PCs1","PCs2")], Sigma, mu)
 inside <- ellipseInOut(Z, p = p)
@@ -629,7 +640,7 @@ dfproc_filter1<-dfproc[dfproc$file_name %in% keep,]
 
 #What do the bad ones look like?
 ggplot()+
-  geom_path(data=dfproc_long_filter1,aes(x=wavenumber,y=value,color=length,group=file_name),size=.5)+ 
+  geom_path(data=dfproc_long_filter1,aes(x=wavenumber,y=value,group=file_name),size=.5,color="gray")+ 
   geom_path(data=bad,aes(x=wavenumber,y=value,group=file_name),size=.5,color="red")+ 
   scale_x_reverse()+
   scale_color_viridis(name="Fork length (mm)")+ #option="magma",
