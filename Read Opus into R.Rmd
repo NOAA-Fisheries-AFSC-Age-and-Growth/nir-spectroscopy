@@ -266,7 +266,7 @@ longindexall<-which(lengths %in% max(lengths)) #this gives the index for each it
 longindexall
 shortindexall<-which(lengths %in% min(lengths)) #this gives the index for each item that matches the criteria
 shortindexall
-normindexall<-which(lengths %in% median(lengths))
+normindexall<-which(lengths %in% median(lengths)) # Note from Esther - maybe this should be mode?
 normindexall
 
 spectra[normindexall[1]] 
